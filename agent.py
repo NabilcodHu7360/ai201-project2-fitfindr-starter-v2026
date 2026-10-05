@@ -13,6 +13,8 @@ Build and test your three tools in `tools.py` first. Then come here.
     python agent.py          runs both example paths below
 """
 
+import re
+
 import config
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
@@ -64,37 +66,9 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         the run ended early and the later fields will still be None.
 
     ─────────────────────────────────────────────────────────────────────────
-    TODO — build this, following the branch rule you wrote in Milestone 2.
-
-      1. Start a session with new_session().
-
-      2. Count the times round the loop, and call trace.check_iterations(count)
-         on each one before you go again. It raises when the count passes
-         MAX_ITERATIONS in config.py — see trace.py.
-
-      3. Parse the query into a description, a size, and a max_price. Regex,
-         string splitting, or asking the model are all fine — say which you
-         chose in your README. Put the result in session["parsed"].
-
-      4. Call search_listings() with what you parsed.
-         Put the results in session["search_results"].
-
-         ⚠️ THIS IS THE BRANCH. If nothing came back:
-              - put a message in session["error"] saying what the user could
-                change — "No results" is not that message
-              - return the session
-              - do NOT call suggest_outfit with nothing
-
-      5. Choose an item — the first result is fine. Put it in
-         session["selected_item"].
-
-      6. Call suggest_outfit() with the selected item and the wardrobe.
-         Put the result in session["outfit_suggestion"].
-
-      7. Call create_fit_card() with the outfit and the item.
-         Put the result in session["fit_card"].
-
-      8. Return the session.
+    The loop parses the query, searches, and branches on the search result.
+    A match moves through the outfit and fit-card stages using session state;
+    an empty result records a useful error and returns immediately.
 
     ─────────────────────────────────────────────────────────────────────────
     IN UNIT 4 you come back and add two things:
@@ -107,8 +81,67 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     session = new_session(query, wardrobe)
 
-    # TODO: delete these two lines and build the loop.
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    price_match = re.search(
+        r"(?:under|below|up to|less than|max(?:imum)?(?: price)?(?: of)?)\s*\$?(\d+(?:\.\d+)?)",
+        query,
+        re.IGNORECASE,
+    )
+    size_match = re.search(r"(?:in\s+)?size\s+([A-Za-z0-9./-]+)", query, re.IGNORECASE)
+
+    description = re.sub(
+        r"(?:under|below|up to|less than|max(?:imum)?(?: price)?(?: of)?)\s*\$?\d+(?:\.\d+)?",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(
+        r"(?:in\s+)?size\s+[A-Za-z0-9./-]+", "", description, flags=re.IGNORECASE
+    )
+    description = re.sub(
+        r"^(?:i(?:'m| am)?\s+)?(?:looking for|searching for|find me|want)\s+",
+        "",
+        description.strip(),
+        flags=re.IGNORECASE,
+    ).strip(" ,.-")
+
+    session["parsed"] = {
+        "description": description,
+        "size": size_match.group(1) if size_match else None,
+        "max_price": float(price_match.group(1)) if price_match else None,
+    }
+
+    stage = "search"
+    iterations = 0
+    while stage:
+        iterations += 1
+        trace.check_iterations(iterations)
+
+        if stage == "search":
+            parsed = session["parsed"]
+            session["search_results"] = search_listings(
+                parsed["description"], parsed["size"], parsed["max_price"]
+            )
+            if not session["search_results"]:
+                session["error"] = (
+                    "No matching listings were found. Try a larger size range, "
+                    "a higher price limit, or fewer description words."
+                )
+                return session
+            session["selected_item"] = session["search_results"][0]
+            stage = "outfit"
+
+        elif stage == "outfit":
+            session["outfit_suggestion"] = suggest_outfit(
+                session["selected_item"], session["wardrobe"]
+            )
+            stage = "fit_card"
+
+        elif stage == "fit_card":
+            session["fit_card"] = create_fit_card(
+                session["outfit_suggestion"], session["selected_item"]
+            )
+            stage = None
+
     return session
 
 
