@@ -43,6 +43,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "parsed": {},                # description / size / max_price you pulled out of it
         "search_results": [],        # everything search_listings returned
         "selected_item": None,       # the one you chose — goes into suggest_outfit
+        "outfit_item_id": None,      # exact item ID passed into suggest_outfit
         "wardrobe": wardrobe,        # the user's wardrobe
         "outfit_suggestion": None,   # what suggest_outfit returned
         "fit_card": None,            # what create_fit_card returned
@@ -162,6 +163,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
             stage = "outfit"
 
         elif stage == "outfit":
+            session["outfit_item_id"] = session["selected_item"]["id"]
             try:
                 session["outfit_suggestion"] = suggest_outfit(
                     session["selected_item"], session["wardrobe"]
@@ -180,7 +182,11 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 return session
             trace.step(
                 "suggest_outfit",
-                inputs={"item": session["selected_item"], "wardrobe": session["wardrobe"]},
+                inputs=(
+                    f"item_id={session['outfit_item_id']}; "
+                    f"selected_item_id={session['selected_item']['id']}; "
+                    f"wardrobe_items={len(session['wardrobe'].get('items', []))}"
+                ),
                 returned=session["outfit_suggestion"],
             )
             stage = "fit_card"
